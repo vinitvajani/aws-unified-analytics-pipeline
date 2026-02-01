@@ -1,0 +1,344 @@
+{
+  "Comment": "Empty starter workflow",
+  "StartAt": "Glue ETL",
+  "States": {
+    "Glue ETL": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "orders-glue-etl",
+        "Arguments": {
+          "--pipeline_run_id.$": "$$.Execution.Id",
+          "--run_time.$": "$$.Execution.StartTime",
+          "--triggered_by": "step_functions"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ],
+      "Next": "Athena MSCK REPAIR"
+    },
+    "Athena MSCK REPAIR": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "MSCK REPAIR TABLE orders",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "Athena Drop curated_daily_revenue",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "Athena Drop curated_daily_revenue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "DROP TABLE IF EXISTS curated_daily_revenue",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "Athena Drop curated_city_revenue",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "Athena Drop curated_city_revenue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "DROP TABLE IF EXISTS curated_city_revenue",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "Athena Drop curated_product_performance",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "Athena Drop curated_product_performance": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "DROP TABLE IF EXISTS curated_product_performance",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "Cleanup Curated S3",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "Cleanup Curated S3": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:ap-south-1:437799327577:function:cleanup-curated-s3:$LATEST",
+        "Payload": {
+          "bucket": "e-comm-proj",
+          "prefixes": [
+            "curated/daily_revenue/",
+            "curated/city_revenue/",
+            "curated/product_performance/"
+          ]
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "Athena CTAS – Daily Revenue",
+      "ResultPath": "$.cleanup_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish",
+          "ResultPath": "$.cleanup_result"
+        }
+      ]
+    },
+    "Athena CTAS – Daily Revenue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "CREATE TABLE curated_daily_revenue WITH ( format = 'PARQUET', external_location = 's3://e-comm-proj/curated/daily_revenue/', partitioned_by = ARRAY['year','month'] ) AS SELECT order_date, SUM(price * quantity) AS daily_revenue, year, month FROM orders WHERE status = 'delivered' GROUP BY order_date, year, month",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "Athena CTAS – City Revenue",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ],
+      "ResultPath": "$.athena_daily_ctas"
+    },
+    "Athena CTAS – City Revenue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "CREATE TABLE curated_city_revenue WITH ( format = 'PARQUET', external_location = 's3://e-comm-proj/curated/city_revenue/', partitioned_by = ARRAY['year','month'] ) AS SELECT city, SUM(price * quantity) AS revenue, year, month FROM orders WHERE status = 'delivered' GROUP BY city, year, month",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "Athena CTAS – Product Performance",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ],
+      "ResultPath": "$.athena_city_revenue"
+    },
+    "Athena CTAS – Product Performance": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Parameters": {
+        "QueryString": "CREATE TABLE curated_product_performance WITH ( format = 'PARQUET', external_location = 's3://e-comm-proj/curated/product_performance/', partitioned_by = ARRAY['year','month'] ) AS SELECT product_name, COUNT(order_id) AS total_orders, SUM(price * quantity) AS revenue, year, month FROM orders WHERE status = 'delivered' GROUP BY product_name, year, month",
+        "QueryExecutionContext": {
+          "Database": "data_eng_db"
+        },
+        "ResultConfiguration": {
+          "OutputLocation": "s3://e-comm-proj/athena-results/"
+        },
+        "WorkGroup": "primary"
+      },
+      "Next": "COPY fact_daily_revenue",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ],
+      "ResultPath": "$.athena_result"
+    },
+    "COPY fact_daily_revenue": {
+      "Type": "Task",
+      "Parameters": {
+        "WorkgroupName": "default-workgroup",
+        "Database": "data_eng",
+        "Sql": "COPY fact_daily_revenue FROM 's3://e-comm-proj/curated/daily_revenue/' IAM_ROLE 'arn:aws:iam::437799327577:role/redshift-role' FORMAT AS PARQUET;"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:redshiftdata:executeStatement.waitForTaskToken",
+      "Next": "COPY fact_city_revenue",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "COPY fact_city_revenue": {
+      "Type": "Task",
+      "Parameters": {
+        "WorkgroupName": "default-workgroup",
+        "Database": "data_eng",
+        "Sql": "COPY fact_city_revenue FROM 's3://e-comm-proj/curated/city_revenue/' IAM_ROLE 'arn:aws:iam::437799327577:role/redshift-role' FORMAT AS PARQUET;"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:redshiftdata:executeStatement",
+      "Next": "COPY fact_product_performance",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "COPY fact_product_performance": {
+      "Type": "Task",
+      "Parameters": {
+        "WorkgroupName": "default-workgroup",
+        "Database": "data_eng",
+        "Sql": "COPY fact_product_performance FROM 's3://e-comm-proj/curated/product_performance/' IAM_ROLE 'arn:aws:iam::437799327577:role/redshift-role' FORMAT AS PARQUET;"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:redshiftdata:executeStatement.waitForTaskToken",
+      "Next": "DynamoDB PutItem Success",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SNS Publish"
+        }
+      ]
+    },
+    "DynamoDB PutItem Success": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "etl_run_status_",
+        "Item": {
+          "pipeline": {
+            "S": "orders_pipeline"
+          },
+          "run_time": {
+            "S.$": "$$.Execution.StartTime"
+          },
+          "status": {
+            "S": "SUCCESS"
+          },
+          "execution_id": {
+            "S.$": "$$.Execution.Id"
+          }
+        }
+      },
+      "Next": "Success"
+    },
+    "SNS Publish": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:ap-south-1:437799327577:etl-alerts",
+        "Message.$": "$"
+      },
+      "Next": "DynamoDB PutItem Failure"
+    },
+    "DynamoDB PutItem Failure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "etl_run_status_",
+        "Item": {
+          "pipeline": {
+            "S": "orders_pipeline"
+          },
+          "run_time": {
+            "S.$": "$$.Execution.StartTime"
+          },
+          "status": {
+            "S": "FAILED"
+          },
+          "execution_id": {
+            "S.$": "$$.Execution.Id"
+          }
+        }
+      },
+      "Next": "Fail"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Fail": {
+      "Type": "Fail"
+    }
+  }
+}
