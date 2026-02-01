@@ -107,7 +107,9 @@ Sample insights include:
 - City-wise performance
 - Order volumes
 
-(Screenshots available in `dashboard/powerbi_screenshots/`)
+Below is the final analytics dashboard built on top of Amazon Redshift and curated data:
+
+![Power BI Dashboard](dashboard/powerbi_screenshots/dashbard_overview.png)
 
 ---
 
