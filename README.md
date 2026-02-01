@@ -71,6 +71,7 @@ Entire workflow orchestrated using AWS Step Functions and triggered automaticall
 ---
 
 ## 📂 Project Structure
+```
 aws-unified-analytics-pipeline/
 ├── architecture/
 ├── ingestion/
@@ -80,7 +81,7 @@ aws-unified-analytics-pipeline/
 ├── warehouse/
 ├── dashboard/
 └── README.md
-
+```
 ---
 
 ## 🔄 Pipeline Features
