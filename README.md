@@ -141,4 +141,5 @@ Vinit Vajani
 Data Engineer | AWS | Python | SQL | ETL Pipelines  
 
 LinkedIn: https://www.linkedin.com/in/vinit-vajani-8672b8208/
+
 GitHub: https://github.com/vinitvajani
